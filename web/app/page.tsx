@@ -1,69 +1,93 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useCallback, useEffect, useState } from "react";
+import { AuditorPanel } from "@/components/AuditorPanel";
+import { ErrandPanel } from "@/components/ErrandPanel";
+import { Header } from "@/components/Header";
+import { ImpactStrip } from "@/components/ImpactStrip";
+import { LedgerPanel } from "@/components/LedgerPanel";
+import { MandatePanel } from "@/components/MandatePanel";
+import { loadLedger, verifyChain } from "@/lib/ledger";
+import { postJson } from "@/lib/storage";
+import type { HealthStatus, ImpactStats, MainTab } from "@/lib/types";
+
+const TAB_IDS: MainTab[] = ["errand", "auditor", "mandate", "ledger"];
+
+export default function Page() {
+  const [tab, setTab] = useState<MainTab>("errand");
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const [stats, setStats] = useState<ImpactStats | null>(null);
+  const [ledgerVersion, setLedgerVersion] = useState(0);
+
+  const bump = useCallback(() => {
+    setLedgerVersion(v => v + 1);
+  }, []);
+
+  const refreshHealth = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      setHealth(await postJson<HealthStatus>("/api/health", {}));
+    } catch {
+      setHealth({ paypal: { configured: false, ok: false, error: "health check failed" }, llm: { ok: false } });
+    } finally {
+      setHealthLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setCancelled(params.get("cancelled") === "1");
+    const t = params.get("tab");
+    if (t && (TAB_IDS as string[]).includes(t)) setTab(t as MainTab);
+    void refreshHealth();
+  }, [refreshHealth]);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const entries = loadLedger();
+      const chain = await verifyChain(entries);
+      if (!live) return;
+      const purchaseEntries = entries.filter(e => e.type === "purchase");
+      setStats({
+        purchases: purchaseEntries.length,
+        hiddenAvoidedCents: purchaseEntries.reduce((a, e) => a + (e.naive?.surpriseCents ?? 0), 0),
+        audits: entries.filter(e => e.type === "audit").length,
+        chainOk: chain.ok,
+        entries: entries.length,
+      });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [ledgerVersion]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen">
+      <Header tab={tab} onTab={setTab} health={health} healthLoading={healthLoading} onRefresh={() => void refreshHealth()} />
+      <main className="mx-auto w-full max-w-6xl space-y-4 px-4 py-5">
+        {cancelled && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[#5a431a] bg-[#33270d] px-4 py-3 text-sm text-[#f5a524]">
+            <span>Payment cancelled on PayPal {"\u00B7"} nothing was charged.</span>
+            <button
+              onClick={() => setCancelled(false)}
+              className="rounded-lg border border-[#5a431a] px-2 py-1 text-xs font-semibold hover:text-[#e8eefc]"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+              Dismiss
+            </button>
+          </div>
+        )}
+        <ImpactStrip stats={stats} />
+        {tab === "errand" && <ErrandPanel onOpenMandate={() => setTab("mandate")} />}
+        {tab === "auditor" && <AuditorPanel onSaved={bump} />}
+        {tab === "mandate" && <MandatePanel />}
+        {tab === "ledger" && <LedgerPanel onChanged={bump} />}
       </main>
+      <footer className="border-t border-[#1f2b46] py-4 text-center text-[11px] text-[#44506e]">
+        MePal {"\u00B7"} PayPal AI Hackathon demo {"\u00B7"} simulated stores, sandbox payments, nothing ships
+      </footer>
     </div>
   );
 }
