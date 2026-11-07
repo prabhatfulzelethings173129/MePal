@@ -8,12 +8,25 @@ const fail = (code: string, error: string, details?: string) =>
 
 const PRODUCT_LIST = PRODUCTS.map(p => p.name).join(", ");
 const BUDGET_RE = /(under|below|maximum|max|less than|up to|within|budget of)\s*\$?\s*([\d][\d,]*(?:\.\d{1,2})?)/i;
+const QTY_WORDS = ["", "one", "two", "three", "four", "five"];
 
 function budgetFromText(text: string): number | null {
   const m = BUDGET_RE.exec(text);
   if (!m) return null;
   const cents = parseAmountToCents(m[2]);
   return Number.isFinite(cents) && cents > 0 ? cents : null;
+}
+
+// AI numbers count only if the same number is written in the user's sentence
+function textHasNumber(text: string, n: number): boolean {
+  const found = text.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
+  return found.some(f => Math.abs(parseFloat(f.replace(/,/g, "")) - n) < 0.005);
+}
+
+function textHasQty(text: string, q: number): boolean {
+  const digit = new RegExp(`(?<![\\d$.,])${q}(?![\\d.,])`);
+  const word = new RegExp(`\\b${QTY_WORDS[q] ?? "x"}\\b`, "i");
+  return digit.test(text) || word.test(text);
 }
 
 export async function POST(req: Request) {
@@ -33,7 +46,7 @@ export async function POST(req: Request) {
         {
           role: "system",
           content:
-            'You map a shopping errand to JSON. Products: hub, mouse, powerbank, stand, keyboard. Respond with ONLY minified JSON, no markdown: {"sku": <"hub"|"mouse"|"powerbank"|"stand"|"keyboard"|null>, "qty": <integer 1-5>, "budget": <positive number in the currency mentioned, or null>}',
+            'You map a shopping errand to JSON. Products: hub, mouse, powerbank, stand, keyboard. Respond with ONLY minified JSON, no markdown: {"sku": <"hub"|"mouse"|"powerbank"|"stand"|"keyboard"|null>, "qty": <integer 1-5>, "budget": <positive number copied exactly from the errand text, or null>}',
         },
         { role: "user", content: `Errand: ${text}` },
       ],
@@ -45,8 +58,15 @@ export async function POST(req: Request) {
         const rawSku = typeof obj.sku === "string" ? obj.sku : null;
         const hit = rawSku ? productBySku(rawSku) : null;
         if (hit) sku = hit.sku;
-        qty = clampInt(typeof obj.qty === "number" ? obj.qty : NaN, 1, 5, 1);
-        if (typeof obj.budget === "number" && Number.isFinite(obj.budget) && obj.budget > 0) {
+        const q = clampInt(typeof obj.qty === "number" ? obj.qty : NaN, 1, 5, 1);
+        qty = q > 1 && !textHasQty(text, q) ? 1 : q;
+        if (
+          budgetCents === null &&
+          typeof obj.budget === "number" &&
+          Number.isFinite(obj.budget) &&
+          obj.budget > 0 &&
+          textHasNumber(text, obj.budget)
+        ) {
           const c = parseAmountToCents(String(obj.budget));
           if (Number.isFinite(c) && c > 0) budgetCents = c;
         }
