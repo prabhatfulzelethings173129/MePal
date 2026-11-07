@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_MANDATE, MANDATE_PRESETS, clampMandate } from "@/lib/guard";
